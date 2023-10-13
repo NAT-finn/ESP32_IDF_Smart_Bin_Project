@@ -1,0 +1,5 @@
+# Loại trừ thư mục 
+/build/
+/.vscode/
+
+#Loại trừ các file có đuôi...
