@@ -55,20 +55,20 @@ static const char *TAG = "SERVO";
 #define DEBUG_ENABLED              1
 
 #define SENSOR_OP_BIN1_PIN         27
-#define SENSOR_OP_BIN2_PIN         13
-#define SENSOR_OP_BOX_PIN          15
+#define SENSOR_OP_BIN2_PIN         21
+#define SENSOR_OP_BOX_PIN          13
 #define SENSOR_CK_BIN1_PIN         23
-#define SENSOR_CK_BIN2_PIN         21
+#define SENSOR_CK_BIN2_PIN         22
 
 #define  SERVO_CH0_PIN             4
 #define  SERVO_CH1_PIN             16
 #define  SERVO_CH2_PIN             17
 
-#define SER0_O                     180
+#define SER0_O                     120
 #define SER0_C                     0
-#define SER1_O                     180
+#define SER1_O                     111
 #define SER1_C                     0
-#define SER2_O                     180
+#define SER2_O                     90
 #define SER2_C                     0
 
 #define CK_DELAY                   500
@@ -76,7 +76,7 @@ static const char *TAG = "SERVO";
 
 #define SERVO_LEDC_INIT_BITS       LEDC_TIMER_10_BIT
 #define FULL_DUTY                  ((1 << SERVO_LEDC_INIT_BITS) - 1)
-#define SERVO_CHANNEL_MAX          3
+#define SERVO_CHANNEL_MAX          5
 #define MAX_SERVO_ANGLE            180
 #define MIN_SERVO_ANGLE            0
 #define MIN_WIDTH_US               500
@@ -88,9 +88,11 @@ static const char *TAG = "SERVO";
 #define DRIVER_IN3                 25
 #define DRIVER_IN4                 26
 
+#define SPEED                      (FULL_DUTY*2/3)
+
 static bool check_en_connect = false;
 static bool check_motor_control = false;
-static uint8_t motor_status[4] = {0,0,0,0};
+static uint32_t motor_status[4] = {0,0,0,0};
 static uint8_t servo_status[3] = {SER0_C,SER1_C,SER2_C};
 static uint8_t cur_servo_status[3] = {SER0_C,SER1_C,SER2_C};
 static bool bin_1_open_by_phone = false;
@@ -102,7 +104,6 @@ static uint16_t check_bin_cnt_free[2] = {0,0};
 static uint8_t check_bin[2] = {0,0};
 static uint8_t old_check_bin[2] = {0,0};
 static uint8_t channel_servo[3] = {LEDC_CHANNEL_0, LEDC_CHANNEL_1, LEDC_CHANNEL_2};
-static uint8_t channel_motor[4] = {DRIVER_IN1, DRIVER_IN2, DRIVER_IN3, DRIVER_IN4};
 
 typedef struct {
     gpio_num_t servo_pin[SERVO_CHANNEL_MAX];     
@@ -172,6 +173,15 @@ esp_err_t servo_write(ledc_mode_t speed_mode, uint8_t channel, float angle)
     esp_err_t ret;
     uint32_t duty = calculate_duty(angle);
     ret = ledc_set_duty(speed_mode, (ledc_channel_t)channel, duty);
+    ret |= ledc_update_duty(speed_mode, (ledc_channel_t)channel);
+    SERVO_CHECK(ESP_OK == ret, "write servo angle failed", ESP_FAIL);
+    return ESP_OK;
+}
+
+esp_err_t motor_write(ledc_mode_t speed_mode, uint8_t channel, uint32_t speed)
+{
+    esp_err_t ret;
+    ret = ledc_set_duty(speed_mode, (ledc_channel_t)channel, speed);
     ret |= ledc_update_duty(speed_mode, (ledc_channel_t)channel);
     SERVO_CHECK(ESP_OK == ret, "write servo angle failed", ESP_FAIL);
     return ESP_OK;
@@ -488,13 +498,13 @@ static void gatts_profile_a_event_handler(esp_gatts_cb_event_t event, esp_gatt_i
         case 0x10:
             check_motor_control = true;
             if(input_data_ctrl == 1){
-                motor_status[0] = 1; motor_status[1] = 0; motor_status[2] = 1; motor_status[3] = 0;
+                motor_status[0] = SPEED; motor_status[1] = 0; motor_status[2] = SPEED; motor_status[3] = 0;
             }else if(input_data_ctrl == 2){
-                motor_status[0] = 1; motor_status[1] = 0; motor_status[2] = 0; motor_status[3] = 1;
+                motor_status[0] = SPEED; motor_status[1] = 0; motor_status[2] = FULL_DUTY - SPEED; motor_status[3] = 1;
             }else if(input_data_ctrl == 3){
-                motor_status[0] = 0; motor_status[1] = 1; motor_status[2] = 0; motor_status[3] = 1;
+                motor_status[0] = FULL_DUTY - SPEED; motor_status[1] = 1; motor_status[2] = FULL_DUTY - SPEED; motor_status[3] = 1;
             }else if(input_data_ctrl == 4){
-                motor_status[0] = 0; motor_status[1] = 1; motor_status[2] = 1; motor_status[3] = 0;
+                motor_status[0] = FULL_DUTY - SPEED; motor_status[1] = 1; motor_status[2] = SPEED; motor_status[3] = 0;
             }else if(input_data_ctrl == 5){
                 motor_status[0] = 0; motor_status[1] = 0; motor_status[2] = 0; motor_status[3] = 0;
             }
@@ -734,7 +744,7 @@ void Config_GPIO(){
     GPIO_config_IN.pin_bit_mask = ((uint64_t)1 << SENSOR_OP_BIN1_PIN) | ((uint64_t)1 << SENSOR_OP_BIN2_PIN) | ((uint64_t)1 << SENSOR_CK_BIN1_PIN) | ((uint64_t)1 << SENSOR_CK_BIN2_PIN) | ((uint64_t)1 << SENSOR_OP_BOX_PIN);
     GPIO_config_IN.mode = GPIO_MODE_INPUT;
     GPIO_config_IN.pull_up_en = 0;
-    GPIO_config_IN.pull_down_en = 1;
+    GPIO_config_IN.pull_down_en = 0;
     GPIO_config_IN.intr_type = GPIO_INTR_DISABLE;
     gpio_config(&GPIO_config_IN);
 
@@ -771,9 +781,11 @@ void ControlTask(void *pvParameters) {
  #ifdef DEBUG_ENABLED
             ESP_LOGE(GATTS_TAG, "get motor change");
 #endif           
-            for(int i = 0; i < 4; i++){
-                gpio_set_level(channel_motor[i], motor_status[i]);
-            }
+            motor_write(LEDC_LOW_SPEED_MODE, LEDC_CHANNEL_3, motor_status[0]);
+            gpio_set_level(DRIVER_IN2, motor_status[1]);
+            motor_write(LEDC_LOW_SPEED_MODE, LEDC_CHANNEL_4, motor_status[2]);
+            gpio_set_level(DRIVER_IN4, motor_status[3]);
+
         }
     } 
 }
@@ -783,7 +795,7 @@ void ReadSensorTask(void *pvParameters) {
         // Read check full Bin 1
         if(gpio_get_level(SENSOR_CK_BIN1_PIN) == 1){
 #ifdef DEBUG_ENABLED
-            ESP_LOGE(GATTS_TAG, "full check 1: %d", check_bin_cnt_full[0]);
+            //ESP_LOGE(GATTS_TAG, "full check 1: %d", check_bin_cnt_full[0]);
 #endif
             check_bin_cnt_full[0]++;
             check_bin_cnt_free[0] = 0;
@@ -895,16 +907,27 @@ void app_main(void)
                 SERVO_CH0_PIN,
                 SERVO_CH1_PIN,
                 SERVO_CH2_PIN,
+                DRIVER_IN1,
+                DRIVER_IN3
                 },
             .ch = {
                 LEDC_CHANNEL_0,
                 LEDC_CHANNEL_1,
                 LEDC_CHANNEL_2,
+                LEDC_CHANNEL_3,
+                LEDC_CHANNEL_4
             },
         },
     };
     servo_init(LEDC_LOW_SPEED_MODE, &servo_cfg);
-    servo_write(LEDC_LOW_SPEED_MODE, LEDC_CHANNEL_0, SER0_C);
+    servo_write(LEDC_LOW_SPEED_MODE, channel_servo[0], SER0_C);
+    servo_write(LEDC_LOW_SPEED_MODE, channel_servo[1], SER1_C);
+    servo_write(LEDC_LOW_SPEED_MODE, channel_servo[2], SER2_C);
+    
+    motor_write(LEDC_LOW_SPEED_MODE, LEDC_CHANNEL_3, motor_status[0]);
+    gpio_set_level(DRIVER_IN2, motor_status[1]);
+    motor_write(LEDC_LOW_SPEED_MODE, LEDC_CHANNEL_4, motor_status[2]);
+    gpio_set_level(DRIVER_IN4, motor_status[3]);
     
     //while(1);
     xTaskCreate(ReadSensorTask, "ReadSensorTask", 4096, NULL, 0, NULL);
