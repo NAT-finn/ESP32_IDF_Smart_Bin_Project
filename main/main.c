@@ -778,7 +778,7 @@ void ControlTask(void *pvParameters) {
 
         if(check_motor_control){
             check_motor_control = false;
- #ifdef DEBUG_ENABLED
+#ifdef DEBUG_ENABLED
             ESP_LOGE(GATTS_TAG, "get motor change");
 #endif           
             motor_write(LEDC_LOW_SPEED_MODE, LEDC_CHANNEL_3, motor_status[0]);
